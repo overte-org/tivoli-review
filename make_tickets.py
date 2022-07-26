@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from git import Repo
+from git import exc
 from github import Github
 import dbm
 import json
@@ -140,7 +141,21 @@ def createIssue(git_repo, repo, commit):
 
         blameinfo = "⚠ 0"
         if os.path.exists(config["repository"]["path"] + "/" + file):
-            blame_data = git_repo.blame('HEAD', file=file)
+
+            try:
+                blame_data = git_repo.blame('HEAD', file=file)
+            except exc.GitCommandError as ex:
+                blame_data = []
+
+                if "no such path" in ex.stderr:
+                    blameinfo = "⚠ Path not in HEAD"
+                else:
+                    blameinfo = "⚠ Git error: " + ex.stderr
+                    print("Unexpected git error: {giterr}".format(giterr = ex))
+
+                    # We probably don't want to continue here, but it will work if we do.
+                    exit(1)
+
             found = 0
             for row in blame_data:
                 row_commit = row[0]
@@ -260,6 +275,7 @@ cmdparser.add_argument("-C", "--update-cache", action="store_true", help="Force 
 cmdparser.add_argument("-D", "--debug", action="store_true", help="Output debug information")
 cmdparser.add_argument("-1", "--only-one", action="store_true", help="Only process one commit. For testing.")
 cmdparser.add_argument("--deduplicate", action="store_true", help="Remove duplicated issues from GitHub")
+cmdparser.add_argument("-c","--commit", type=str, action="store", help="Process only a specific commit. For testing.")
 
 cmdargs = vars(cmdparser.parse_args())
 
@@ -289,7 +305,11 @@ if cmdargs["update_cache"]:
 git_repo = Repo(config["repository"]["path"])
 assert not git_repo.bare
 
-commits = list(git_repo.iter_commits(config["repository"]["branch"], max_count = config["repository"]["commit-backlog"]))
+if cmdargs["commit"]:
+    commits = [ git_repo.commit(cmdargs["commit"]) ]
+else:
+    commits = list(git_repo.iter_commits(config["repository"]["branch"], max_count = config["repository"]["commit-backlog"]))
+
 commits.reverse()
 
 processed = 0
